@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>버블버블</title>
+  <style>
+    :root {
+      --bg: #0c1021;
+      --accent: #5df0ff;
+      --bubble: #8bf6ff;
+      --enemy: #ff6388;
+      --platform: #1f2747;
+      --text: #e8ecff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: 'Pretendard', 'Noto Sans KR', sans-serif;
+      background: radial-gradient(circle at 50% 20%, #1d2452, #0c1021 50%);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .frame {
+      background: rgba(0,0,0,0.35);
+      border: 2px solid #2e3b70;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+      border-radius: 18px;
+      padding: 16px 16px 8px;
+      backdrop-filter: blur(8px);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      text-align: center;
+      color: var(--accent);
+    }
+
+    canvas {
+      display: block;
+      background: linear-gradient(#0f162f, #0a1025 70%);
+      width: 640px;
+      height: 480px;
+      border: 2px solid #2f3860;
+      border-radius: 12px;
+    }
+
+    .hud {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 0 4px 10px;
+      font-size: 15px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      color: #9fb5ff;
+      font-size: 14px;
+    }
+
+    .pill {
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid #3f4c7a;
+      background: rgba(255,255,255,0.05);
+    }
+
+    button {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid #4b5c9b;
+      background: #1c2650;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform 0.1s ease, box-shadow 0.1s ease;
+    }
+
+    button:hover { box-shadow: 0 0 0 2px rgba(93,240,255,0.3); }
+    button:active { transform: translateY(1px); }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <h1>버블버블</h1>
+    <div class="hud">
+      <div class="controls">
+        <span class="pill">← → : 이동</span>
+        <span class="pill">Z : 점프</span>
+        <span class="pill">X : 버블</span>
+      </div>
+      <button id="reset">다시하기</button>
+    </div>
+    <canvas id="game" width="320" height="240" aria-label="버블버블 게임"></canvas>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scale = 2;
+    const w = canvas.width;
+    const h = canvas.height;
+
+    const state = {
+      gravity: 0.35,
+      friction: 0.82,
+      player: null,
+      platforms: [],
+      enemies: [],
+      bubbles: [],
+      particles: [],
+      keys: { left: false, right: false, jump: false, bubble: false },
+      score: 0,
+      gameOver: false,
+      win: false,
+    };
+
+    const palette = {
+      player: '#5df0ff',
+      playerDark: '#2ea4c2',
+      enemy: '#ff6388',
+      platform: '#2a345e',
+      bubble: '#8bf6ff',
+      bubbleDark: '#4ac3d6',
+    };
+
+    class Entity {
+      constructor(x, y, w, h) {
+        this.x = x;
+        this.y = y;
+        this.w = w;
+        this.h = h;
+        this.vx = 0;
+        this.vy = 0;
+        this.onGround = false;
+      }
+
+      get rect() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
+    }
+
+    class Player extends Entity {
+      constructor() {
+        super(20, h - 40, 12, 16);
+        this.cooldown = 0;
+      }
+
+      update() {
+        const speed = 1.1;
+        if (state.keys.left) this.vx -= speed;
+        if (state.keys.right) this.vx += speed;
+        this.vx *= state.friction;
+
+        if (state.keys.jump && this.onGround) {
+          this.vy = -5.6;
+          this.onGround = false;
+        }
+
+        this.vy += state.gravity;
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // world bounds
+        if (this.x < 0) this.x = 0;
+        if (this.x + this.w > w) this.x = w - this.w;
+
+        handlePlatforms(this);
+
+        if (this.cooldown > 0) this.cooldown -= 1;
+
+        if (state.keys.bubble && this.cooldown <= 0) {
+          spawnBubble(this.x + this.w / 2, this.y + 4, this.vx * 0.3);
+          this.cooldown = 20;
+        }
+      }
+
+      draw() {
+        ctx.save();
+        ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = palette.player;
+        ctx.beginPath();
+        ctx.roundRect(-3.5, -4, 7, 8, 2);
+        ctx.fill();
+        ctx.fillStyle = palette.playerDark;
+        ctx.fillRect(-3, -1, 6, 2);
+        ctx.restore();
+      }
+    }
+
+    class Enemy extends Entity {
+      constructor(x, y) {
+        super(x, y, 12, 12);
+        this.dir = Math.random() > 0.5 ? 1 : -1;
+        this.trapped = false;
+        this.trapTime = 0;
+      }
+
+      update() {
+        if (this.trapped) {
+          this.trapTime -= 1;
+          this.vy = Math.sin(Date.now() / 180) * 0.2;
+          if (this.trapTime <= 0) this.trapped = false;
+          return;
+        }
+
+        const speed = 0.6;
+        this.vx += this.dir * speed;
+        this.vx *= 0.92;
+        this.vy += state.gravity;
+        this.x += this.vx;
+        this.y += this.vy;
+
+        if (this.x < 0 || this.x + this.w > w) {
+          this.dir *= -1;
+          this.vx *= -1;
+        }
+
+        handlePlatforms(this);
+      }
+
+      draw() {
+        ctx.save();
+        ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = this.trapped ? palette.bubble : palette.enemy;
+        ctx.beginPath();
+        ctx.roundRect(-3, -3, 6, 6, 2);
+        ctx.fill();
+        if (!this.trapped) {
+          ctx.fillStyle = '#ffdbe8';
+          ctx.fillRect(-1.5, -1, 1.5, 1.5);
+          ctx.fillRect(0.5, -1, 1.5, 1.5);
+        }
+        ctx.restore();
+      }
+    }
+
+    class Bubble {
+      constructor(x, y, vx) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = -2.2;
+        this.radius = 4;
+        this.lifetime = 180;
+      }
+
+      update() {
+        this.lifetime -= 1;
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy = Math.max(this.vy + 0.02, -0.2);
+      }
+
+      draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.scale(scale, scale);
+        const grad = ctx.createRadialGradient(0, 0, 1, 0, 0, 4);
+        grad.addColorStop(0, '#ffffff80');
+        grad.addColorStop(1, palette.bubble);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, 0, this.radius / scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    function handlePlatforms(entity) {
+      entity.onGround = false;
+      for (const p of state.platforms) {
+        if (
+          entity.x < p.x + p.w &&
+          entity.x + entity.w > p.x &&
+          entity.y + entity.h < p.y + 6 &&
+          entity.y + entity.h > p.y &&
+          entity.vy >= 0
+        ) {
+          entity.y = p.y - entity.h;
+          entity.vy = 0;
+          entity.onGround = true;
+        }
+      }
+      if (entity.y + entity.h > h) {
+        entity.y = h - entity.h;
+        entity.vy = 0;
+        entity.onGround = true;
+      }
+    }
+
+    function spawnBubble(x, y, vx) {
+      state.bubbles.push(new Bubble(x, y, vx));
+    }
+
+    function spawnParticles(x, y, color) {
+      for (let i = 0; i < 12; i++) {
+        state.particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 2,
+          vy: (Math.random() - 0.5) * 2,
+          life: 25,
+          color,
+        });
+      }
+    }
+
+    function init() {
+      state.player = new Player();
+      state.platforms = [
+        { x: 20, y: 190, w: 90 },
+        { x: 200, y: 190, w: 90 },
+        { x: 110, y: 150, w: 100 },
+        { x: 40, y: 110, w: 80 },
+        { x: 200, y: 110, w: 80 },
+        { x: 110, y: 70, w: 100 },
+      ];
+      state.enemies = [new Enemy(250, 50), new Enemy(60, 30), new Enemy(150, 120)];
+      state.bubbles = [];
+      state.particles = [];
+      state.score = 0;
+      state.gameOver = false;
+      state.win = false;
+    }
+
+    function update() {
+      if (state.gameOver) return;
+
+      state.player.update();
+      state.enemies.forEach(e => e.update());
+      state.bubbles.forEach(b => b.update());
+
+      // bubble-enemy collision
+      for (const bubble of state.bubbles) {
+        for (const enemy of state.enemies) {
+          if (!enemy.trapped && Math.abs(bubble.x - (enemy.x + enemy.w / 2)) < 10 && Math.abs(bubble.y - (enemy.y + enemy.h / 2)) < 10) {
+            enemy.trapped = true;
+            enemy.trapTime = 300;
+            spawnParticles(enemy.x, enemy.y, palette.bubble);
+          }
+        }
+      }
+
+      // pop trapped enemies by touching
+      state.enemies = state.enemies.filter(enemy => {
+        if (enemy.trapped && rectIntersect(state.player.rect, enemy.rect)) {
+          state.score += 200;
+          spawnParticles(enemy.x, enemy.y, '#ffd166');
+          return false;
+        }
+        return true;
+      });
+
+      // bubbles expire
+      state.bubbles = state.bubbles.filter(b => b.lifetime > 0 && b.y > -10);
+      state.particles = state.particles.filter(p => --p.life > 0);
+
+      // lose condition
+      if (!state.win) {
+        for (const enemy of state.enemies) {
+          if (!enemy.trapped && rectIntersect(state.player.rect, enemy.rect)) {
+            state.gameOver = true;
+          }
+        }
+      }
+
+      // win condition
+      if (!state.gameOver && state.enemies.length === 0) {
+        state.win = true;
+        state.gameOver = true;
+      }
+    }
+
+    function rectIntersect(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function drawBackground() {
+      ctx.fillStyle = '#0b112b';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(93,240,255,0.35)';
+      for (let y = 0; y < h; y += 24) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(w, y + 0.5);
+        ctx.stroke();
+      }
+    }
+
+    function drawPlatforms() {
+      for (const p of state.platforms) {
+        ctx.fillStyle = palette.platform;
+        ctx.beginPath();
+        ctx.roundRect(p.x, p.y, p.w, 10, 4);
+        ctx.fill();
+      }
+    }
+
+    function drawHUD() {
+      ctx.fillStyle = '#9fb5ff';
+      ctx.font = '9px "Press Start 2P", "Pretendard", sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`SCORE ${state.score.toString().padStart(5, '0')}`, 8, 6);
+
+      if (state.gameOver) {
+        const msg = state.win ? 'STAGE CLEAR!' : 'GAME OVER';
+        ctx.fillStyle = state.win ? '#7af08f' : '#ff7b91';
+        ctx.font = '12px "Press Start 2P", sans-serif';
+        const tw = ctx.measureText(msg).width;
+        ctx.fillText(msg, w / 2 - tw / 2, h / 2 - 6);
+      }
+    }
+
+    function drawParticles() {
+      for (const p of state.particles) {
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(p.life / 25, 0);
+        ctx.fillRect(p.x, p.y, 2, 2);
+        ctx.globalAlpha = 1;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.02;
+      }
+    }
+
+    function loop() {
+      update();
+      drawBackground();
+      drawPlatforms();
+      state.player.draw();
+      state.enemies.forEach(e => e.draw());
+      state.bubbles.forEach(b => b.draw());
+      drawParticles();
+      drawHUD();
+      requestAnimationFrame(loop);
+    }
+
+    function bindInput() {
+      const keyMap = {
+        ArrowLeft: 'left',
+        ArrowRight: 'right',
+        KeyZ: 'jump',
+        KeyX: 'bubble',
+      };
+      document.addEventListener('keydown', (e) => {
+        if (keyMap[e.code]) {
+          state.keys[keyMap[e.code]] = true;
+          e.preventDefault();
+        }
+      });
+      document.addEventListener('keyup', (e) => {
+        if (keyMap[e.code]) {
+          state.keys[keyMap[e.code]] = false;
+          e.preventDefault();
+        }
+      });
+    }
+
+    document.getElementById('reset').addEventListener('click', init);
+
+    init();
+    bindInput();
+    loop();
+  </script>
+</body>
+</html>
