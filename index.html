@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>버블버블</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="page">
+    <section class="hud">
+      <div class="title">버블버블</div>
+      <div class="stats">
+        <div class="stat"><span class="label">점수</span><span id="score">0</span></div>
+        <div class="stat"><span class="label">라이프</span><span id="lives">3</span></div>
+        <div class="stat"><span class="label">라운드</span><span id="round">1</span></div>
+      </div>
+      <button id="restart">다시 시작</button>
+    </section>
+
+    <section class="game-wrapper">
+      <canvas id="game" width="480" height="720" aria-label="버블버블 게임 영역"></canvas>
+      <div class="help">
+        <p>← → 또는 A / D로 이동, 스페이스바로 버블 발사!</p>
+        <p>버블이 화면 아래에 닿지 않도록 모두 터뜨리세요.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
